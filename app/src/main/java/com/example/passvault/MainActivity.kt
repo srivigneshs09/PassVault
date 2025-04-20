@@ -3,6 +3,7 @@ package com.example.passvault
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -22,7 +23,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         authenticateApp {
-            setupUI()
+            try {
+                setupUI()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Error setting up UI: ${e.message}", Toast.LENGTH_LONG).show()
+                finish()
+            }
         }
     }
 
@@ -39,9 +45,10 @@ class MainActivity : AppCompatActivity() {
                 .setSubtitle("Access your password vault")
                 .setAllowedAuthenticators(
                     BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-                ).build()
+                )
+                .build()
 
-            val biometricPrompt = BiometricPrompt(this, executor,
+            val biometricPrompt = BiometricPrompt(this@MainActivity, executor,
                 object : BiometricPrompt.AuthenticationCallback() {
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                         super.onAuthenticationSucceeded(result)
@@ -50,6 +57,7 @@ class MainActivity : AppCompatActivity() {
 
                     override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                         super.onAuthenticationError(errorCode, errString)
+                        Toast.makeText(this@MainActivity, "Authentication error: $errString", Toast.LENGTH_LONG).show()
                         finish()
                     }
                 })
@@ -74,18 +82,18 @@ class MainActivity : AppCompatActivity() {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         ) as EncryptedSharedPreferences
 
-        adapter = CredentialAdapter(credentials) { credential ->
-            authenticateItem {
-                Toast.makeText(this, "Username: ${credential.username}\nPassword: ${credential.password}", Toast.LENGTH_LONG).show()
-            }
-        }
+        adapter = CredentialAdapter(
+            credentials,
+            onItemClick = { credential -> showCredential(credential) },
+            onItemLongClick = { credential -> authenticateThenDelete(credential) }
+        )
 
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
 
         loadCredentials()
 
-        binding.fab.setOnClickListener {
+        binding.addFab.setOnClickListener {
             startActivity(Intent(this, AddCredentialActivity::class.java))
         }
     }
@@ -98,36 +106,92 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun authenticateItem(onSuccess: () -> Unit) {
+    private fun showCredential(credential: Credential) {
         val executor = ContextCompat.getMainExecutor(this)
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Authenticate to view details")
-            .setSubtitle("Biometric or PIN required")
+            .setTitle("Authenticate to view")
+            .setSubtitle(credential.title)
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
             .build()
 
-        val biometricPrompt = BiometricPrompt(this, executor,
+        val biometricPrompt = BiometricPrompt(this@MainActivity, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    onSuccess()
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle(credential.title)
+                        .setMessage("Username: ${credential.username}\nPassword: ${credential.password}")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    Toast.makeText(this@MainActivity, "Authentication error: $errString", Toast.LENGTH_LONG).show()
                 }
             })
 
         biometricPrompt.authenticate(promptInfo)
     }
 
-    private fun loadCredentials() {
-        encryptedPrefs.all.forEach { entry ->
-            if (entry.key.endsWith("-user")) {
-                val title = entry.key.removeSuffix("-user")
-                val username = entry.value as String
-                val password = encryptedPrefs.getString("$title-pass", "") ?: ""
-                credentials.add(Credential(title, username, password))
+    private fun authenticateThenDelete(credential: Credential) {
+        val executor = ContextCompat.getMainExecutor(this)
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Authenticate to delete")
+            .setSubtitle(credential.title)
+            .setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
+            .build()
+
+        val biometricPrompt = BiometricPrompt(this@MainActivity, executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    showDeleteDialog(credential)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    Toast.makeText(this@MainActivity, "Authentication error: $errString", Toast.LENGTH_LONG).show()
+                }
+            })
+
+        biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun showDeleteDialog(credential: Credential) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete '${credential.title}'?")
+            .setMessage("Are you sure you want to delete this credential?")
+            .setPositiveButton("Delete") { _, _ ->
+                encryptedPrefs.edit()
+                    .remove("${credential.title}-user")
+                    .remove("${credential.title}-pass")
+                    .apply()
+                loadCredentials()
+                Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
             }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun loadCredentials() {
+        try {
+            credentials.clear()
+            encryptedPrefs.all.forEach { entry ->
+                if (entry.key.endsWith("-user")) {
+                    val title = entry.key.removeSuffix("-user")
+                    val username = entry.value as String
+                    val password = encryptedPrefs.getString("$title-pass", "") ?: ""
+                    credentials.add(Credential(title, username, password))
+                }
+            }
+            adapter.notifyDataSetChanged()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error loading credentials: ${e.message}", Toast.LENGTH_LONG).show()
         }
-        adapter.notifyDataSetChanged()
     }
 }

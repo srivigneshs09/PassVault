@@ -6,8 +6,9 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.passvault.databinding.ItemCredentialBinding
 
 class CredentialAdapter(
-    private val items: List<Credential>,
-    private val onClick: (Credential) -> Unit
+    private val list: List<Credential>,
+    private val onItemClick: (Credential) -> Unit,
+    private val onItemLongClick: (Credential) -> Unit
 ) : RecyclerView.Adapter<CredentialAdapter.VH>() {
 
     inner class VH(val binding: ItemCredentialBinding) : RecyclerView.ViewHolder(binding.root)
@@ -17,12 +18,18 @@ class CredentialAdapter(
         return VH(binding)
     }
 
-    override fun getItemCount() = items.size
-
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val item = items[position]
-        holder.binding.titleText.text = item.title
-        holder.binding.credentialInfo.text = "••••••••••"
-        holder.binding.root.setOnClickListener { onClick(item) }
+        val item = list[position]
+        holder.binding.title.text = item.title
+        holder.binding.username.text = "••••••••"
+        holder.binding.password.text = "••••••••"
+
+        holder.binding.root.setOnClickListener { onItemClick(item) }
+        holder.binding.root.setOnLongClickListener {
+            onItemLongClick(item)
+            true
+        }
     }
+
+    override fun getItemCount() = list.size
 }

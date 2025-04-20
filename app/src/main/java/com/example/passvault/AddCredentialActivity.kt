@@ -30,10 +30,14 @@ class AddCredentialActivity : AppCompatActivity() {
             val pwd = binding.passwordInput.text.toString()
 
             if (title.isNotEmpty() && uname.isNotEmpty() && pwd.isNotEmpty()) {
-                prefs.edit().putString("$title-user", uname)
-                    .putString("$title-pass", pwd).apply()
+                prefs.edit()
+                    .putString("$title-user", uname)
+                    .putString("$title-pass", pwd)
+                    .apply()
                 Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
                 finish()
+            } else {
+                Toast.makeText(this, "Please fill all fields", Toast.LENGTH_SHORT).show()
             }
         }
     }
